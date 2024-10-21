@@ -1,27 +1,29 @@
 import xml.etree.ElementTree as ET
+import requests
 
-class Currency():
-    def __init__(self,name,factor,code,rate):
+class Currency:
+    def __init__(self, name, code, rate):
         self.__name = name
-        self.__factor = factor
         self.__code = code
         self.__rate = rate
+
     def getRate(self):
         return self.__rate
+
     def getName(self):
         return self.__name
+
     def getCode(self):
         return self.__code
-    def getFactor(self):
-        return  self.__factor
 
-class CurrencyCollection():
+
+class CurrencyCollection:
     _instance = None
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(CurrencyCollection, cls).__new__(cls)
-            cls._instance._currencies = []  # Inicjalizacja listy walut
+            cls._instance._currencies = []
         return cls._instance
 
     def addCurrency(self, currency):
@@ -37,45 +39,35 @@ class CurrencyCollection():
         for currency in self._currencies:
             if currency.getCode() == code:
                 return currency
-        return None  # Zwraca None, jeśli waluta nie została znaleziona
+        return None
 
-class DataParser():
-    # Parsowanie pliku XML
-    def parseData(self,path):
-        tree = ET.parse(path)
-        root = tree.getroot()
 
-        # Wyciągnięcie danych z pliku
+class DataParser:
+    def getRawData(self, url):
+        response = requests.get(url)
+        return response
 
-        for pozycja in root.findall('pozycja'):
-            nazwa_waluty = pozycja.find('nazwa_waluty').text
-            przelicznik = pozycja.find('przelicznik').text
-            kod_waluty = pozycja.find('kod_waluty').text
-            kurs_sredni = pozycja.find('kurs_sredni').text
-            newCurrency = Currency(nazwa_waluty,przelicznik,kod_waluty,kurs_sredni)
+    def parseApiData(self, rawData):
+        data = rawData.json()
+        for i in data[0]['rates']:
+            name = i['currency']
+            code = i['code']
+            rate = i['mid']
+            newCurrency = Currency(name, code, rate)
             collection = CurrencyCollection()
             collection.addCurrency(newCurrency)
 
-class Exchange():
-    def exchangeCurrency(self,amount,baseCode,targetCode):
 
+class Exchange:
+    def exchangeCurrency(self, amount, baseCode, targetCode):
         allCurrencies = CurrencyCollection()
-
         targetCurr = allCurrencies.getCurrencyByCode(targetCode)
         baseCurr = allCurrencies.getCurrencyByCode(baseCode)
-
-        targetRate = float(targetCurr.getRate().replace(',','.'))
-        targetFactor = float(targetCurr.getFactor())
-
-        baseRate = float(baseCurr.getRate().replace(',','.'))
-        baseFactor = float(baseCurr.getFactor())
-
-
-        newMoney = amount * ((baseRate / baseFactor) / (targetRate / targetFactor))
-
+        newMoney = amount * (baseCurr.getRate() / targetCurr.getRate())
         return newMoney
 
-class UserInterface():
+
+class UserInterface:
     def start(self):
         while True:
             amountOfBaseCurrency = None
@@ -83,10 +75,10 @@ class UserInterface():
             targetCurrency = None
             collection = CurrencyCollection()
 
-            while baseCurrency == None:
-                baseCurrency = collection.getCurrencyByCode(input('podaj kod waluty bazowej:').upper())
-                if (baseCurrency == None):
-                    print('nie ma waluty o takim kodzie')
+            while baseCurrency is None:
+                baseCurrency = collection.getCurrencyByCode(input('Podaj kod waluty bazowej:').upper())
+                if baseCurrency is None:
+                    print('Nie ma waluty o takim kodzie')
 
             while amountOfBaseCurrency is None:
                 try:
@@ -94,27 +86,30 @@ class UserInterface():
                 except ValueError:
                     print('Można podać tylko liczbę.')
 
-
-            while targetCurrency == None:
-                targetCurrency = collection.getCurrencyByCode(input('podaj kod waluty docelowej:').upper())
-                if (targetCurrency == None):
-                    print('nie ma waluty o takim kodzie')
+            while targetCurrency is None:
+                targetCurrency = collection.getCurrencyByCode(input('Podaj kod waluty docelowej:').upper())
+                if targetCurrency is None:
+                    print('Nie ma waluty o takim kodzie')
 
             myCantor = Exchange()
-            exchangedMoney = myCantor.exchangeCurrency(amountOfBaseCurrency, baseCurrency.getCode(),
-                                                       targetCurrency.getCode())
-            print(f'Z waluty {baseCurrency.getName()} o ilości {amountOfBaseCurrency} do waluty {targetCurrency.getName()} wyszło: {exchangedMoney}')
+            exchangedMoney = myCantor.exchangeCurrency(
+                amountOfBaseCurrency, baseCurrency.getCode(), targetCurrency.getCode())
+
+            print(f'Z waluty {baseCurrency.getName()} o ilości {amountOfBaseCurrency} '
+                  f'do waluty {targetCurrency.getName()} wyszło: {exchangedMoney}')
             print('\n\n\n')
 
 
-
+# Parsowanie danych i uruchamianie interfejsu
 myDataParser = DataParser()
-myDataParser.parseData('waluty.xml')
+response = myDataParser.getRawData("https://api.nbp.pl/api/exchangerates/tables/a/")
 
-myCollection = CurrencyCollection()
-
-polskiZloty = Currency("polski złoty",'1.0',"PLN",'1.0')
-
-myCollection.addCurrency(polskiZloty)
-
-UserInterface().start()
+if response.status_code != 200:
+    print('Niestety nie udało się pobrać danych, problem z siecią')
+else:
+    myDataParser.parseApiData(response)
+    # Dodajemy polski złoty
+    myCollection = CurrencyCollection()
+    polskiZloty = Currency("polski złoty", "PLN", 1.0)
+    myCollection.addCurrency(polskiZloty)
+    UserInterface().start()
